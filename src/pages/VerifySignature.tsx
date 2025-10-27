@@ -5,14 +5,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, ArrowLeft, CheckCircle, XCircle, Upload, Loader2 } from "lucide-react";
+import { Shield, ArrowLeft, CheckCircle, XCircle, Upload, Loader2, Type } from "lucide-react";
+import { verifySignature, generateHash } from "@/utils/crypto";
 
 const VerifySignature = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
+  const [textContent, setTextContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [verifyMode, setVerifyMode] = useState<"file" | "text">("file");
   const [verificationResult, setVerificationResult] = useState<{
     verified: boolean;
     message: string;
@@ -35,26 +40,45 @@ const VerifySignature = () => {
     }
   };
 
-  const generateHash = async (data: string): Promise<string> => {
-    const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(data);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const handleTextChange = (value: string) => {
+    setTextContent(value);
+    setVerificationResult(null);
   };
 
+
   const handleVerify = async () => {
-    if (!file) return;
+    if (verifyMode === "file" && !file) {
+      toast({
+        title: "File required",
+        description: "Please select a file to verify",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (verifyMode === "text" && !textContent.trim()) {
+      toast({
+        title: "Text required",
+        description: "Please enter text to verify",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setLoading(true);
     setVerificationResult(null);
 
     try {
-      // Generate hash of the uploaded file
-      const fileContent = await file.text();
-      const fileHash = await generateHash(fileContent);
+      let dataToVerify: string;
 
-      // Search for document with matching hash
+      if (verifyMode === "file" && file) {
+        dataToVerify = await file.text();
+      } else {
+        dataToVerify = textContent;
+      }
+
+      const fileHash = await generateHash(dataToVerify);
+
       const { data: documents, error: docError } = await supabase
         .from('documents')
         .select(`
@@ -73,7 +97,7 @@ const VerifySignature = () => {
       if (!documents || documents.length === 0) {
         setVerificationResult({
           verified: false,
-          message: "This document has not been signed or the signature is invalid"
+          message: "This content has not been signed or the signature is invalid"
         });
         return;
       }
@@ -84,26 +108,56 @@ const VerifySignature = () => {
       if (!signature) {
         setVerificationResult({
           verified: false,
-          message: "No signature found for this document"
+          message: "No signature found for this content"
         });
         return;
       }
 
-      setVerificationResult({
-        verified: true,
-        message: "Document signature verified successfully!",
-        details: {
-          fileName: doc.file_name,
-          signedAt: new Date(signature.created_at).toLocaleString(),
-          status: doc.status,
-          signer: signature.signature_data
-        }
-      });
+      // Get public key from audit logs
+      const { data: auditLogs } = await supabase
+        .from('audit_logs')
+        .select('metadata')
+        .eq('resource_id', doc.id)
+        .eq('action', 'document_signed')
+        .limit(1)
+        .single();
 
-      toast({
-        title: "Verification Complete",
-        description: "Document signature is valid",
-      });
+      const metadata = auditLogs?.metadata as { public_key?: string } | null;
+      const publicKey = metadata?.public_key;
+      
+      if (!publicKey) {
+        setVerificationResult({
+          verified: false,
+          message: "Public key not found. Cannot verify signature."
+        });
+        return;
+      }
+
+      const isValid = await verifySignature(dataToVerify, signature.signature_data, publicKey);
+
+      if (isValid) {
+        setVerificationResult({
+          verified: true,
+          message: "Signature verified successfully! Content is authentic and unmodified.",
+          details: {
+            fileName: doc.file_name,
+            signedAt: new Date(signature.created_at).toLocaleString(),
+            status: doc.status,
+            signatureBase64: signature.signature_data.substring(0, 64) + "...",
+            publicKeyPreview: publicKey.substring(0, 64) + "..."
+          }
+        });
+
+        toast({
+          title: "Verification Complete",
+          description: "Signature is valid and authentic",
+        });
+      } else {
+        setVerificationResult({
+          verified: false,
+          message: "Signature verification failed! Content may have been tampered with."
+        });
+      }
     } catch (error: any) {
       console.error("Error verifying signature:", error);
       toast({
@@ -149,40 +203,71 @@ const VerifySignature = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="verify-file">Document to Verify</Label>
-              <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
-                <Input
-                  id="verify-file"
-                  type="file"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.txt"
-                />
-                <label htmlFor="verify-file" className="cursor-pointer">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                  {file ? (
-                    <div>
-                      <p className="font-medium text-foreground">{file.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {(file.size / 1024).toFixed(2)} KB
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="font-medium text-foreground">Click to upload</p>
-                      <p className="text-sm text-muted-foreground">
-                        PDF, DOC, DOCX, TXT
-                      </p>
-                    </div>
-                  )}
-                </label>
-              </div>
-            </div>
+            <Tabs value={verifyMode} onValueChange={(v) => setVerifyMode(v as "file" | "text")}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="file">
+                  <Upload className="w-4 h-4 mr-2" />
+                  Verify File
+                </TabsTrigger>
+                <TabsTrigger value="text">
+                  <Type className="w-4 h-4 mr-2" />
+                  Verify Text
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="file" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="verify-file">Document to Verify</Label>
+                  <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
+                    <Input
+                      id="verify-file"
+                      type="file"
+                      onChange={handleFileChange}
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,.txt"
+                    />
+                    <label htmlFor="verify-file" className="cursor-pointer">
+                      <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                      {file ? (
+                        <div>
+                          <p className="font-medium text-foreground">{file.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {(file.size / 1024).toFixed(2)} KB
+                          </p>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="font-medium text-foreground">Click to upload</p>
+                          <p className="text-sm text-muted-foreground">
+                            PDF, DOC, DOCX, TXT
+                          </p>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="text" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="verify-text">Text to Verify</Label>
+                  <Textarea
+                    id="verify-text"
+                    placeholder="Enter the text to verify..."
+                    value={textContent}
+                    onChange={(e) => handleTextChange(e.target.value)}
+                    className="min-h-[200px] font-mono"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    The signature will be verified using the stored public key
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
 
             <Button
               onClick={handleVerify}
-              disabled={!file || loading}
+              disabled={(verifyMode === "file" ? !file : !textContent.trim()) || loading}
               className="w-full"
               size="lg"
             >
@@ -225,16 +310,24 @@ const VerifySignature = () => {
                             <span className="font-medium">{verificationResult.details.fileName}</span>
                           </div>
                           <div className="flex justify-between py-2 border-t border-border">
-                            <span className="text-muted-foreground">Signed By:</span>
-                            <span className="font-medium">{verificationResult.details.signer}</span>
-                          </div>
-                          <div className="flex justify-between py-2 border-t border-border">
                             <span className="text-muted-foreground">Signed At:</span>
                             <span className="font-medium">{verificationResult.details.signedAt}</span>
                           </div>
                           <div className="flex justify-between py-2 border-t border-border">
                             <span className="text-muted-foreground">Status:</span>
                             <span className="font-medium capitalize">{verificationResult.details.status}</span>
+                          </div>
+                          <div className="py-2 border-t border-border space-y-1">
+                            <span className="text-muted-foreground">Signature (Base64):</span>
+                            <p className="font-mono text-xs break-all bg-muted/50 p-2 rounded">
+                              {verificationResult.details.signatureBase64}
+                            </p>
+                          </div>
+                          <div className="py-2 border-t border-border space-y-1">
+                            <span className="text-muted-foreground">Public Key:</span>
+                            <p className="font-mono text-xs break-all bg-muted/50 p-2 rounded">
+                              {verificationResult.details.publicKeyPreview}
+                            </p>
                           </div>
                         </div>
                       )}
@@ -250,10 +343,10 @@ const VerifySignature = () => {
                 <span className="font-medium">Verification Process:</span>
               </div>
               <ul className="text-sm text-muted-foreground space-y-1 ml-6">
-                <li>• Document hash is generated using SHA-256</li>
-                <li>• Hash is compared against database records</li>
-                <li>• Signature authenticity is cryptographically verified</li>
-                <li>• Tamper detection through hash comparison</li>
+                <li>• Content hash generated using SHA-256</li>
+                <li>• RSA-2048 signature verification with public key</li>
+                <li>• Base64 signature comparison</li>
+                <li>• Tamper detection through cryptographic validation</li>
               </ul>
             </div>
           </CardContent>

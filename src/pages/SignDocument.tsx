@@ -5,17 +5,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Upload, FileSignature, ArrowLeft, Loader2 } from "lucide-react";
+import { Shield, Upload, FileSignature, ArrowLeft, Loader2, Key, Type } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import { generateKeyPair, signData, generateHash } from "@/utils/crypto";
 
 const SignDocument = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [textContent, setTextContent] = useState("");
   const [loading, setLoading] = useState(false);
-  const [signatureText, setSignatureText] = useState("");
+  const [generatingKeys, setGeneratingKeys] = useState(false);
+  const [privateKey, setPrivateKey] = useState("");
+  const [publicKey, setPublicKey] = useState("");
+  const [signMode, setSignMode] = useState<"file" | "text">("file");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -23,9 +30,43 @@ const SignDocument = () => {
         navigate("/auth");
       } else {
         setUser(session.user);
+        loadStoredKeys(session.user.id);
       }
     });
   }, [navigate]);
+
+  const loadStoredKeys = async (userId: string) => {
+    const stored = localStorage.getItem(`keys_${userId}`);
+    if (stored) {
+      const keys = JSON.parse(stored);
+      setPrivateKey(keys.privateKey);
+      setPublicKey(keys.publicKey);
+    }
+  };
+
+  const handleGenerateKeys = async () => {
+    if (!user) return;
+    setGeneratingKeys(true);
+    try {
+      const keys = await generateKeyPair();
+      setPrivateKey(keys.privateKey);
+      setPublicKey(keys.publicKey);
+      localStorage.setItem(`keys_${user.id}`, JSON.stringify(keys));
+      toast({
+        title: "Keys generated successfully!",
+        description: "Your private and public keys are ready to use.",
+      });
+    } catch (error) {
+      console.error("Error generating keys:", error);
+      toast({
+        title: "Error",
+        description: "Failed to generate keys",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingKeys(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -42,20 +83,30 @@ const SignDocument = () => {
     }
   };
 
-  const generateHash = async (data: string): Promise<string> => {
-    const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(data);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  };
 
   const handleSign = async () => {
-    if (!file || !user) return;
-    if (!signatureText.trim()) {
+    if (!user || !privateKey || !publicKey) {
       toast({
-        title: "Signature required",
-        description: "Please enter your signature text",
+        title: "Keys required",
+        description: "Please generate your key pair first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (signMode === "file" && !file) {
+      toast({
+        title: "File required",
+        description: "Please select a file to sign",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (signMode === "text" && !textContent.trim()) {
+      toast({
+        title: "Text required",
+        description: "Please enter text to sign",
         variant: "destructive",
       });
       return;
@@ -64,28 +115,37 @@ const SignDocument = () => {
     setLoading(true);
 
     try {
-      // Upload file to storage
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, file);
+      let dataToSign: string;
+      let fileName: string;
+      let filePath: string | null = null;
 
-      if (uploadError) throw uploadError;
+      if (signMode === "file" && file) {
+        const fileContent = await file.text();
+        dataToSign = fileContent;
+        fileName = file.name;
 
-      // Generate hashes
-      const fileContent = await file.text();
-      const fileHash = await generateHash(fileContent);
-      const signatureHash = await generateHash(signatureText + fileHash + user.id);
+        const fileExt = file.name.split('.').pop();
+        filePath = `${user.id}/${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(filePath, file);
 
-      // Create document record
+        if (uploadError) throw uploadError;
+      } else {
+        dataToSign = textContent;
+        fileName = `text_document_${Date.now()}.txt`;
+      }
+
+      const fileHash = await generateHash(dataToSign);
+      const signature = await signData(dataToSign, privateKey);
+
       const { data: document, error: docError } = await supabase
         .from('documents')
         .insert({
           user_id: user.id,
-          file_name: file.name,
-          file_path: fileName,
+          file_name: fileName,
+          file_path: filePath || `text/${user.id}/${Date.now()}`,
           file_hash: fileHash,
           status: 'signed'
         })
@@ -94,21 +154,19 @@ const SignDocument = () => {
 
       if (docError) throw docError;
 
-      // Create signature record
       const { error: sigError } = await supabase
         .from('signatures')
         .insert({
           document_id: document.id,
           user_id: user.id,
-          signature_data: signatureText,
-          signature_hash: signatureHash,
-          ip_address: 'client-side', // In production, get from server
+          signature_data: signature,
+          signature_hash: fileHash,
+          ip_address: 'client-side',
           user_agent: navigator.userAgent
         });
 
       if (sigError) throw sigError;
 
-      // Create audit log
       await supabase.from('audit_logs').insert({
         user_id: user.id,
         action: 'document_signed',
@@ -117,14 +175,15 @@ const SignDocument = () => {
         ip_address: 'client-side',
         user_agent: navigator.userAgent,
         metadata: {
-          file_name: file.name,
-          file_size: file.size
+          file_name: fileName,
+          sign_mode: signMode,
+          public_key: publicKey
         }
       });
 
       toast({
         title: "Document signed successfully!",
-        description: "Your document has been securely signed and stored.",
+        description: "Your document has been cryptographically signed with RSA-2048.",
       });
 
       navigate("/documents");
@@ -157,97 +216,169 @@ const SignDocument = () => {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-2xl">
-        <Card className="border-border">
-          <CardHeader>
-            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-4">
-              <FileSignature className="w-6 h-6 text-primary-foreground" />
-            </div>
-            <CardTitle className="text-2xl">Sign New Document</CardTitle>
-            <CardDescription>
-              Upload a document and apply your digital signature
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="file">Document File</Label>
-              <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
-                <Input
-                  id="file"
-                  type="file"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.txt"
-                />
-                <label htmlFor="file" className="cursor-pointer">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                  {file ? (
-                    <div>
-                      <p className="font-medium text-foreground">{file.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {(file.size / 1024).toFixed(2)} KB
-                      </p>
-                    </div>
+      <main className="container mx-auto px-4 py-8 max-w-3xl">
+        <div className="space-y-6">
+          <Card className="border-border">
+            <CardHeader>
+              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-4">
+                <Key className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <CardTitle className="text-2xl">Cryptographic Keys</CardTitle>
+              <CardDescription>
+                Generate your RSA-2048 key pair for digital signatures
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!privateKey || !publicKey ? (
+                <Button onClick={handleGenerateKeys} disabled={generatingKeys} className="w-full" size="lg">
+                  {generatingKeys ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating Keys...
+                    </>
                   ) : (
-                    <div>
-                      <p className="font-medium text-foreground">Click to upload</p>
-                      <p className="text-sm text-muted-foreground">
-                        PDF, DOC, DOCX, TXT (Max 10MB)
-                      </p>
-                    </div>
+                    <>
+                      <Key className="w-4 h-4 mr-2" />
+                      Generate Key Pair
+                    </>
                   )}
-                </label>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="signature">Your Digital Signature</Label>
-              <Input
-                id="signature"
-                type="text"
-                placeholder="Enter your full name as signature"
-                value={signatureText}
-                onChange={(e) => setSignatureText(e.target.value)}
-                className="font-serif text-lg"
-              />
-              <p className="text-sm text-muted-foreground">
-                This will be cryptographically signed with SHA-256 encryption
-              </p>
-            </div>
-
-            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm">
-                <Shield className="w-4 h-4 text-primary" />
-                <span className="font-medium">Security Features:</span>
-              </div>
-              <ul className="text-sm text-muted-foreground space-y-1 ml-6">
-                <li>• SHA-256 hash verification</li>
-                <li>• Tamper-proof digital signature</li>
-                <li>• Complete audit trail logging</li>
-                <li>• Encrypted cloud storage</li>
-              </ul>
-            </div>
-
-            <Button
-              onClick={handleSign}
-              disabled={!file || !signatureText.trim() || loading}
-              className="w-full"
-              size="lg"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Signing Document...
-                </>
+                </Button>
               ) : (
-                <>
-                  <FileSignature className="w-4 h-4 mr-2" />
-                  Sign Document
-                </>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-primary">
+                    <Key className="w-5 h-5" />
+                    <span className="font-semibold">Keys Generated Successfully</span>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Public Key (Base64)</Label>
+                      <div className="mt-1 p-3 bg-muted/50 rounded-md font-mono text-xs break-all">
+                        {publicKey.substring(0, 80)}...
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Private Key (Base64)</Label>
+                      <div className="mt-1 p-3 bg-muted/50 rounded-md font-mono text-xs break-all">
+                        {privateKey.substring(0, 80)}... (Stored securely in browser)
+                      </div>
+                    </div>
+                  </div>
+                  <Button onClick={handleGenerateKeys} variant="outline" size="sm">
+                    Regenerate Keys
+                  </Button>
+                </div>
               )}
-            </Button>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border">
+            <CardHeader>
+              <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center mb-4">
+                <FileSignature className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <CardTitle className="text-2xl">Sign Document</CardTitle>
+              <CardDescription>
+                Choose to sign a file or text content
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <Tabs value={signMode} onValueChange={(v) => setSignMode(v as "file" | "text")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="file">
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload File
+                  </TabsTrigger>
+                  <TabsTrigger value="text">
+                    <Type className="w-4 h-4 mr-2" />
+                    Write Text
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="file" className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="file">Document File</Label>
+                    <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
+                      <Input
+                        id="file"
+                        type="file"
+                        onChange={handleFileChange}
+                        className="hidden"
+                        accept=".pdf,.doc,.docx,.txt"
+                      />
+                      <label htmlFor="file" className="cursor-pointer">
+                        <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                        {file ? (
+                          <div>
+                            <p className="font-medium text-foreground">{file.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {(file.size / 1024).toFixed(2)} KB
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="font-medium text-foreground">Click to upload</p>
+                            <p className="text-sm text-muted-foreground">
+                              PDF, DOC, DOCX, TXT (Max 10MB)
+                            </p>
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="text" className="space-y-4 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="text-content">Text to Sign</Label>
+                    <Textarea
+                      id="text-content"
+                      placeholder="Enter the text you want to sign..."
+                      value={textContent}
+                      onChange={(e) => setTextContent(e.target.value)}
+                      className="min-h-[200px] font-mono"
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      The text will be cryptographically signed with your private key
+                    </p>
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <Shield className="w-4 h-4 text-primary" />
+                  <span className="font-medium">Security Features:</span>
+                </div>
+                <ul className="text-sm text-muted-foreground space-y-1 ml-6">
+                  <li>• RSA-2048 asymmetric cryptography</li>
+                  <li>• Base64 encoded signatures</li>
+                  <li>• SHA-256 hash verification</li>
+                  <li>• Complete audit trail logging</li>
+                  <li>• Encrypted cloud storage</li>
+                </ul>
+              </div>
+
+              <Button
+                onClick={handleSign}
+                disabled={!privateKey || !publicKey || (signMode === "file" ? !file : !textContent.trim()) || loading}
+                className="w-full"
+                size="lg"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Signing...
+                  </>
+                ) : (
+                  <>
+                    <FileSignature className="w-4 h-4 mr-2" />
+                    Sign {signMode === "file" ? "File" : "Text"}
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </main>
     </div>
   );
