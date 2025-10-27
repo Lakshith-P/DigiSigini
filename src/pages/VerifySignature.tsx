@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, ArrowLeft, CheckCircle, XCircle, Upload, Loader2, Type } from "lucide-react";
+import { Shield, ArrowLeft, CheckCircle, XCircle, Upload, Loader2, Type, Key } from "lucide-react";
 import { verifySignature, generateHash } from "@/utils/crypto";
 
 const VerifySignature = () => {
@@ -23,6 +23,8 @@ const VerifySignature = () => {
     message: string;
     details?: any;
   } | null>(null);
+  const [manualSignature, setManualSignature] = useState("");
+  const [manualPublicKey, setManualPublicKey] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -77,73 +79,94 @@ const VerifySignature = () => {
         dataToVerify = textContent;
       }
 
-      const fileHash = await generateHash(dataToVerify);
+      // Use manual inputs if provided, otherwise fetch from database
+      let signatureData = manualSignature;
+      let publicKey = manualPublicKey;
+      let documentDetails = null;
 
-      const { data: documents, error: docError } = await supabase
-        .from('documents')
-        .select(`
-          *,
-          signatures (
-            signature_data,
-            signature_hash,
-            created_at,
-            ip_address
-          )
-        `)
-        .eq('file_hash', fileHash);
+      // If manual data not provided, try to fetch from database
+      if (!signatureData || !publicKey) {
+        const fileHash = await generateHash(dataToVerify);
 
-      if (docError) throw docError;
+        const { data: documents, error: docError } = await supabase
+          .from('documents')
+          .select(`
+            *,
+            signatures (
+              signature_data,
+              signature_hash,
+              created_at,
+              ip_address
+            )
+          `)
+          .eq('file_hash', fileHash);
 
-      if (!documents || documents.length === 0) {
-        setVerificationResult({
-          verified: false,
-          message: "This content has not been signed or the signature is invalid"
-        });
-        return;
+        if (docError) throw docError;
+
+        if (!documents || documents.length === 0) {
+          setVerificationResult({
+            verified: false,
+            message: "This content has not been signed or no signature/public key provided"
+          });
+          return;
+        }
+
+        const doc = documents[0];
+        const signature = doc.signatures?.[0];
+
+        if (!signature) {
+          setVerificationResult({
+            verified: false,
+            message: "No signature found for this content"
+          });
+          return;
+        }
+
+        // Get public key from audit logs
+        const { data: auditLogs } = await supabase
+          .from('audit_logs')
+          .select('metadata')
+          .eq('resource_id', doc.id)
+          .eq('action', 'document_signed')
+          .limit(1)
+          .single();
+
+        const metadata = auditLogs?.metadata as { public_key?: string } | null;
+        const dbPublicKey = metadata?.public_key;
+        
+        if (!dbPublicKey) {
+          setVerificationResult({
+            verified: false,
+            message: "Public key not found. Cannot verify signature."
+          });
+          return;
+        }
+
+        signatureData = signature.signature_data;
+        publicKey = dbPublicKey;
+        documentDetails = {
+          fileName: doc.file_name,
+          signedAt: new Date(signature.created_at).toLocaleString(),
+          status: doc.status,
+        };
+
+        // Auto-populate manual fields for user reference
+        setManualSignature(signatureData);
+        setManualPublicKey(publicKey);
       }
 
-      const doc = documents[0];
-      const signature = doc.signatures?.[0];
-
-      if (!signature) {
-        setVerificationResult({
-          verified: false,
-          message: "No signature found for this content"
-        });
-        return;
-      }
-
-      // Get public key from audit logs
-      const { data: auditLogs } = await supabase
-        .from('audit_logs')
-        .select('metadata')
-        .eq('resource_id', doc.id)
-        .eq('action', 'document_signed')
-        .limit(1)
-        .single();
-
-      const metadata = auditLogs?.metadata as { public_key?: string } | null;
-      const publicKey = metadata?.public_key;
-      
-      if (!publicKey) {
-        setVerificationResult({
-          verified: false,
-          message: "Public key not found. Cannot verify signature."
-        });
-        return;
-      }
-
-      const isValid = await verifySignature(dataToVerify, signature.signature_data, publicKey);
+      const isValid = await verifySignature(dataToVerify, signatureData, publicKey);
 
       if (isValid) {
         setVerificationResult({
           verified: true,
           message: "Signature verified successfully! Content is authentic and unmodified.",
-          details: {
-            fileName: doc.file_name,
-            signedAt: new Date(signature.created_at).toLocaleString(),
-            status: doc.status,
-            signatureBase64: signature.signature_data.substring(0, 64) + "...",
+          details: documentDetails ? {
+            ...documentDetails,
+            signatureBase64: signatureData.substring(0, 64) + "...",
+            publicKeyPreview: publicKey.substring(0, 64) + "..."
+          } : {
+            signatureBase64: signatureData.substring(0, 64) + "...",
             publicKeyPreview: publicKey.substring(0, 64) + "..."
           }
         });
@@ -264,6 +287,40 @@ const VerifySignature = () => {
                 </div>
               </TabsContent>
             </Tabs>
+
+            <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Key className="w-4 h-4" />
+                Verification Credentials (Optional - Auto-filled from database if available)
+              </h3>
+              
+              <div className="space-y-2">
+                <Label htmlFor="manual-signature">Generated Signature (Base64)</Label>
+                <Textarea
+                  id="manual-signature"
+                  placeholder="Paste the generated signature here..."
+                  value={manualSignature}
+                  onChange={(e) => setManualSignature(e.target.value)}
+                  className="font-mono text-xs h-32"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="manual-public-key">Public Key</Label>
+                <Textarea
+                  id="manual-public-key"
+                  placeholder="Paste the public key here..."
+                  value={manualPublicKey}
+                  onChange={(e) => setManualPublicKey(e.target.value)}
+                  className="font-mono text-xs h-32"
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                These fields will auto-populate from the database if the document was signed in this system. 
+                Otherwise, paste the signature and public key manually.
+              </p>
+            </div>
 
             <Button
               onClick={handleVerify}

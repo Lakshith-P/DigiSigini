@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Upload, FileSignature, ArrowLeft, Loader2, Key, Type } from "lucide-react";
+import { Shield, Upload, FileSignature, ArrowLeft, Loader2, Key, Type, Copy, CheckCircle } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { generateKeyPair, signData, generateHash } from "@/utils/crypto";
 
@@ -23,6 +23,7 @@ const SignDocument = () => {
   const [privateKey, setPrivateKey] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [signMode, setSignMode] = useState<"file" | "text">("file");
+  const [generatedSignature, setGeneratedSignature] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -139,6 +140,9 @@ const SignDocument = () => {
 
       const fileHash = await generateHash(dataToSign);
       const signature = await signData(dataToSign, privateKey);
+      
+      // Store the generated signature for display
+      setGeneratedSignature(signature);
 
       const { data: document, error: docError } = await supabase
         .from('documents')
@@ -183,10 +187,8 @@ const SignDocument = () => {
 
       toast({
         title: "Document signed successfully!",
-        description: "Your document has been cryptographically signed with RSA-2048.",
+        description: "Your document has been cryptographically signed with RSA-2048. Copy the signature below for verification.",
       });
-
-      navigate("/documents");
     } catch (error: any) {
       console.error("Error signing document:", error);
       toast({
@@ -343,6 +345,65 @@ const SignDocument = () => {
                   </div>
                 </TabsContent>
               </Tabs>
+
+              {generatedSignature && (
+                <Card className="border-2 border-primary">
+                  <CardContent className="pt-6 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-primary" />
+                      <h3 className="font-bold text-lg">Document Signed Successfully!</h3>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="generated-signature">Generated Signature (Base64)</Label>
+                      <Textarea
+                        id="generated-signature"
+                        value={generatedSignature}
+                        readOnly
+                        className="font-mono text-xs h-32"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedSignature);
+                          toast({
+                            title: "Copied!",
+                            description: "Signature copied to clipboard",
+                          });
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Signature
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="public-key-copy">Public Key (for verification)</Label>
+                      <Textarea
+                        id="public-key-copy"
+                        value={publicKey}
+                        readOnly
+                        className="font-mono text-xs h-32"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(publicKey);
+                          toast({
+                            title: "Copied!",
+                            description: "Public key copied to clipboard",
+                          });
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Public Key
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="bg-muted/50 rounded-lg p-4 space-y-2">
                 <div className="flex items-center gap-2 text-sm">
