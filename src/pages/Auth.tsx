@@ -103,7 +103,7 @@ const Auth = () => {
           <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
             <Shield className="w-8 h-8 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl font-bold">SecureSign</CardTitle>
+          <CardTitle className="text-2xl font-bold">DigiSigini</CardTitle>
           <CardDescription>Digital signature platform with enterprise security</CardDescription>
         </CardHeader>
 

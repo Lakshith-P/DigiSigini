@@ -98,7 +98,7 @@ const Dashboard = () => {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center">
               <Shield className="w-6 h-6 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold">SecureSign</h1>
+            <h1 className="text-xl font-bold">DigiSigini</h1>
           </div>
           <div className="flex items-center gap-4">
             <Button variant="outline" size="sm" onClick={() => navigate("/profile")}>

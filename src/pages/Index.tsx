@@ -18,7 +18,7 @@ const Index = () => {
               <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center">
                 <Shield className="w-6 h-6 text-primary-foreground" />
               </div>
-              <span className="text-xl font-bold">SecureSign</span>
+              <span className="text-xl font-bold">DigiSigini</span>
             </div>
             <div className="flex gap-3">
               <Button variant="outline" onClick={() => navigate("/auth")}>
@@ -64,7 +64,7 @@ const Index = () => {
       {/* Features Section */}
       <div className="container mx-auto px-4 py-24">
         <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">Why Choose SecureSign?</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">Why Choose DigiSigini?</h2>
           <p className="text-xl text-muted-foreground">Built for security professionals and enterprises</p>
         </div>
 
@@ -149,7 +149,7 @@ const Index = () => {
           <CardContent className="p-12 text-center">
             <h2 className="text-3xl md:text-4xl font-bold mb-4">Ready to Get Started?</h2>
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-              Join thousands of professionals who trust SecureSign for their digital signature needs
+              Join thousands of professionals who trust DigiSigini for their digital signature needs
             </p>
             <Button size="lg" onClick={() => navigate("/auth")}>
               Create Free Account
@@ -162,7 +162,7 @@ const Index = () => {
       {/* Footer */}
       <footer className="border-t border-border py-8">
         <div className="container mx-auto px-4 text-center text-muted-foreground">
-          <p>© 2025 SecureSign. All rights reserved.</p>
+          <p>© 2025 DigiSigini. All rights reserved.</p>
         </div>
       </footer>
     </div>
