@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, ArrowLeft, CheckCircle, XCircle, Upload, Loader2, Type, Key } from "lucide-react";
+import { Shield, ArrowLeft, CheckCircle, XCircle, Upload, Loader2, Type, Key, Copy } from "lucide-react";
 import { verifySignature, generateHash } from "@/utils/crypto";
 
 const VerifySignature = () => {
@@ -122,7 +122,7 @@ const VerifySignature = () => {
           return;
         }
 
-        // Get public key from audit logs
+        // Get public key and signature from audit logs
         const { data: auditLogs } = await supabase
           .from('audit_logs')
           .select('metadata')
@@ -131,18 +131,19 @@ const VerifySignature = () => {
           .limit(1)
           .single();
 
-        const metadata = auditLogs?.metadata as { public_key?: string } | null;
+        const metadata = auditLogs?.metadata as { public_key?: string; signature?: string } | null;
         const dbPublicKey = metadata?.public_key;
+        const dbSignature = metadata?.signature || signature.signature_data;
         
         if (!dbPublicKey) {
           setVerificationResult({
             verified: false,
-            message: "Public key not found. Cannot verify signature."
+            message: "Public key not found in database. Cannot verify signature."
           });
           return;
         }
 
-        signatureData = signature.signature_data;
+        signatureData = dbSignature;
         publicKey = dbPublicKey;
         documentDetails = {
           fileName: doc.file_name,
@@ -150,7 +151,7 @@ const VerifySignature = () => {
           status: doc.status,
         };
 
-        // Auto-populate manual fields for user reference
+        // Auto-populate manual fields with the EXACT keys from database
         setManualSignature(signatureData);
         setManualPublicKey(publicKey);
       }
@@ -291,14 +292,35 @@ const VerifySignature = () => {
             <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
               <h3 className="font-semibold flex items-center gap-2">
                 <Key className="w-4 h-4" />
-                Verification Credentials (Optional - Auto-filled from database if available)
+                Verification Credentials
+                {manualSignature && manualPublicKey && (
+                  <span className="text-xs text-primary bg-primary/10 px-2 py-1 rounded">Auto-filled from database</span>
+                )}
               </h3>
               
               <div className="space-y-2">
-                <Label htmlFor="manual-signature">Generated Signature (Base64)</Label>
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="manual-signature">Generated Signature (Base64)</Label>
+                  {manualSignature && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(manualSignature);
+                        toast({
+                          title: "Copied!",
+                          description: "Signature copied to clipboard",
+                        });
+                      }}
+                    >
+                      <Copy className="w-3 h-3 mr-1" />
+                      Copy
+                    </Button>
+                  )}
+                </div>
                 <Textarea
                   id="manual-signature"
-                  placeholder="Paste the generated signature here..."
+                  placeholder="Paste the generated signature here or it will auto-fill from database..."
                   value={manualSignature}
                   onChange={(e) => setManualSignature(e.target.value)}
                   className="font-mono text-xs h-32"
@@ -306,20 +328,42 @@ const VerifySignature = () => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="manual-public-key">Public Key</Label>
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="manual-public-key">Public Key (Same as in Sign Document)</Label>
+                  {manualPublicKey && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(manualPublicKey);
+                        toast({
+                          title: "Copied!",
+                          description: "Public key copied to clipboard",
+                        });
+                      }}
+                    >
+                      <Copy className="w-3 h-3 mr-1" />
+                      Copy
+                    </Button>
+                  )}
+                </div>
                 <Textarea
                   id="manual-public-key"
-                  placeholder="Paste the public key here..."
+                  placeholder="Paste the public key here or it will auto-fill from database..."
                   value={manualPublicKey}
                   onChange={(e) => setManualPublicKey(e.target.value)}
                   className="font-mono text-xs h-32"
                 />
               </div>
 
-              <p className="text-xs text-muted-foreground">
-                These fields will auto-populate from the database if the document was signed in this system. 
-                Otherwise, paste the signature and public key manually.
-              </p>
+              <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+                <p className="text-xs text-foreground">
+                  <strong>Auto-fill:</strong> When you verify a document signed in this system, both fields automatically fill with the exact signature and public key used during signing.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  <strong>Manual:</strong> If signing was done externally, paste both values manually to verify.
+                </p>
+              </div>
             </div>
 
             <Button

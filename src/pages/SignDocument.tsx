@@ -171,6 +171,7 @@ const SignDocument = () => {
 
       if (sigError) throw sigError;
 
+      // Store audit log with the EXACT public key used for signing
       await supabase.from('audit_logs').insert({
         user_id: user.id,
         action: 'document_signed',
@@ -181,7 +182,8 @@ const SignDocument = () => {
         metadata: {
           file_name: fileName,
           sign_mode: signMode,
-          public_key: publicKey
+          public_key: publicKey,  // This exact key will be used for verification
+          signature: signature    // Also store signature for easy retrieval
         }
       });
 
@@ -253,13 +255,30 @@ const SignDocument = () => {
                   </div>
                   <div className="space-y-3">
                     <div>
-                      <Label className="text-xs text-muted-foreground">Public Key (Base64)</Label>
-                      <div className="mt-1 p-3 bg-muted/50 rounded-md font-mono text-xs break-all">
-                        {publicKey.substring(0, 80)}...
-                      </div>
+                      <Label className="text-xs text-muted-foreground">Public Key (Base64) - Use this for verification</Label>
+                      <Textarea
+                        value={publicKey}
+                        readOnly
+                        className="mt-1 font-mono text-xs h-24 bg-muted/50"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() => {
+                          navigator.clipboard.writeText(publicKey);
+                          toast({
+                            title: "Copied!",
+                            description: "Public key copied to clipboard",
+                          });
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Public Key
+                      </Button>
                     </div>
                     <div>
-                      <Label className="text-xs text-muted-foreground">Private Key (Base64)</Label>
+                      <Label className="text-xs text-muted-foreground">Private Key (Base64) - Keep secure!</Label>
                       <div className="mt-1 p-3 bg-muted/50 rounded-md font-mono text-xs break-all">
                         {privateKey.substring(0, 80)}... (Stored securely in browser)
                       </div>
