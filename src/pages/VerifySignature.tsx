@@ -30,6 +30,13 @@ const VerifySignature = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
         navigate("/auth");
+      } else {
+        // Auto-load public key from localStorage (same as sign document)
+        const stored = localStorage.getItem(`keys_${session.user.id}`);
+        if (stored) {
+          const keys = JSON.parse(stored);
+          setManualPublicKey(keys.publicKey);
+        }
       }
     });
   }, [navigate]);
@@ -345,10 +352,13 @@ const VerifySignature = () => {
 
               <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
                 <p className="text-xs text-foreground">
-                  <strong>Auto-fill:</strong> When you verify a document signed in this system, both fields automatically fill with the exact signature and public key used during signing.
+                  <strong>✓ Auto-filled:</strong> Public key automatically loaded from your sign document keys.
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  <strong>Manual:</strong> If signing was done externally, paste both values manually to verify.
+                  <strong>Database lookup:</strong> Signature will auto-fill when you verify a document signed in this system.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  <strong>Manual entry:</strong> You can paste both values manually if signing was done externally.
                 </p>
               </div>
             </div>
