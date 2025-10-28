@@ -145,11 +145,6 @@ const VerifySignature = () => {
 
         signatureData = dbSignature;
         publicKey = dbPublicKey;
-        documentDetails = {
-          fileName: doc.file_name,
-          signedAt: new Date(signature.created_at).toLocaleString(),
-          status: doc.status,
-        };
 
         // Auto-populate manual fields with the EXACT keys from database
         setManualSignature(signatureData);
@@ -161,15 +156,7 @@ const VerifySignature = () => {
       if (isValid) {
         setVerificationResult({
           verified: true,
-          message: "Signature verified successfully! Content is authentic and unmodified.",
-          details: documentDetails ? {
-            ...documentDetails,
-            signatureBase64: signatureData.substring(0, 64) + "...",
-            publicKeyPreview: publicKey.substring(0, 64) + "..."
-          } : {
-            signatureBase64: signatureData.substring(0, 64) + "...",
-            publicKeyPreview: publicKey.substring(0, 64) + "..."
-          }
+          message: "Signature verified successfully! Content is authentic and unmodified."
         });
 
         toast({
@@ -402,36 +389,7 @@ const VerifySignature = () => {
                       <h3 className="font-bold text-lg mb-2">
                         {verificationResult.verified ? "Signature Verified" : "Verification Failed"}
                       </h3>
-                      <p className="text-muted-foreground mb-4">{verificationResult.message}</p>
-                      
-                      {verificationResult.verified && verificationResult.details && (
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between py-2 border-t border-border">
-                            <span className="text-muted-foreground">File Name:</span>
-                            <span className="font-medium">{verificationResult.details.fileName}</span>
-                          </div>
-                          <div className="flex justify-between py-2 border-t border-border">
-                            <span className="text-muted-foreground">Signed At:</span>
-                            <span className="font-medium">{verificationResult.details.signedAt}</span>
-                          </div>
-                          <div className="flex justify-between py-2 border-t border-border">
-                            <span className="text-muted-foreground">Status:</span>
-                            <span className="font-medium capitalize">{verificationResult.details.status}</span>
-                          </div>
-                          <div className="py-2 border-t border-border space-y-1">
-                            <span className="text-muted-foreground">Signature (Base64):</span>
-                            <p className="font-mono text-xs break-all bg-muted/50 p-2 rounded">
-                              {verificationResult.details.signatureBase64}
-                            </p>
-                          </div>
-                          <div className="py-2 border-t border-border space-y-1">
-                            <span className="text-muted-foreground">Public Key:</span>
-                            <p className="font-mono text-xs break-all bg-muted/50 p-2 rounded">
-                              {verificationResult.details.publicKeyPreview}
-                            </p>
-                          </div>
-                        </div>
-                      )}
+                      <p className="text-muted-foreground">{verificationResult.message}</p>
                     </div>
                   </div>
                 </CardContent>
