@@ -252,8 +252,4 @@ npm run dev
 4. Submit pull requests for review
 5. Deploy to staging before production
 
-## License
-Proprietary - All rights reserved
 
-## Support
-For technical support or questions, please contact the development team.
